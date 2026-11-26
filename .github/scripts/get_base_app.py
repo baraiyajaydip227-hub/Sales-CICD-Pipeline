@@ -12,6 +12,11 @@ CONFIG_PATH = ROOT / ".github/config/pipeline_config.json"
 
 
 def main():
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"Config not found: {CONFIG_PATH}"
+        )
+
     with open(CONFIG_PATH, encoding="utf-8") as file:
         config = json.load(file)
 
@@ -30,39 +35,85 @@ def main():
 
     request = urllib.request.Request(
         url,
-        headers={"Authorization": f"Bearer {token}"}
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        },
+        method="GET"
     )
 
-    with urllib.request.urlopen(request, timeout=30) as response:
-        result = json.loads(response.read())
+    print("Checking Qlik Base Application...")
+    print(f"Expected App Name: {app_name}")
 
-    matches = [
-        item for item in result.get("data", [])
-        if item.get("name") == app_name
-        and item.get("resourceType") == "app"
-    ]
+    try:
+        with urllib.request.urlopen(
+            request, timeout=30
+        ) as response:
+            result = json.loads(response.read())
 
-    if len(matches) == 0:
-        raise RuntimeError(f"Base app not found: {app_name}")
+        items = result.get("data", [])
 
-    if len(matches) > 1:
-        raise RuntimeError(
-            f"Multiple apps found with name: {app_name}"
+        print(f"API Returned Items: {len(items)}")
+
+        # Diagnostic information only; no secrets are printed.
+        for item in items:
+            print(
+                "Found Item:",
+                "Name =", item.get("name"),
+                "| Resource Type =", item.get("resourceType"),
+                "| Resource ID Available =",
+                bool(item.get("resourceId"))
+            )
+
+        matches = [
+            item for item in items
+            if item.get("name") == app_name
+            and item.get("resourceType") == "app"
+        ]
+
+        if len(matches) == 0:
+            print("\nBase application was not found.")
+            print(
+                "Check the OAuth read scope and app visibility."
+            )
+            raise RuntimeError(
+                f"Base app not found: {app_name}"
+            )
+
+        if len(matches) > 1:
+            raise RuntimeError(
+                f"Multiple apps found with name: {app_name}"
+            )
+
+        app_id = matches[0].get("resourceId")
+
+        if not app_id:
+            raise RuntimeError(
+                "App ID not returned by Qlik API."
+            )
+
+        print(f"\nBase Application found: {app_name}")
+        print("App ID retrieved successfully.")
+
+        github_output = os.environ.get("GITHUB_OUTPUT")
+
+        if github_output:
+            with open(
+                github_output, "a", encoding="utf-8"
+            ) as file:
+                file.write(f"app_id={app_id}\n")
+
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode(
+            "utf-8", errors="replace"
         )
 
-    app_id = matches[0]["resourceId"]
+        print(f"Qlik API HTTP Error: {error.code}")
+        print(f"Qlik API Response: {error_body}")
 
-    if not app_id:
-        raise RuntimeError("App ID not returned by Qlik API")
-
-    print(f"Base Application found: {app_name}")
-    print("App ID retrieved successfully.")
-
-    github_output = os.environ.get("GITHUB_OUTPUT")
-
-    if github_output:
-        with open(github_output, "a", encoding="utf-8") as file:
-            file.write(f"app_id={app_id}\n")
+        raise RuntimeError(
+            "Unable to discover Qlik base application."
+        )
 
 
 if __name__ == "__main__":
