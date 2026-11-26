@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / ".github/config/pipeline_config.json"
@@ -32,11 +33,10 @@ def export_qvf():
         raise RuntimeError("Dynamic Base App ID is missing.")
 
     app_name = config["project"]["base_app"]
-    no_data = config["deployment"]["no_data"]
 
-    if no_data is not True:
+    if config["deployment"]["no_data"] is not True:
         raise RuntimeError(
-            "No-data export must be enabled in pipeline_config.json."
+            "No-data export must be enabled."
         )
 
     export_url = (
@@ -47,7 +47,8 @@ def export_qvf():
         export_url,
         headers={
             "Authorization": f"Bearer {token}",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "Content-Type": "application/octet-stream"
         },
         method="POST"
     )
@@ -64,17 +65,32 @@ def export_qvf():
 
         if not download_url:
             raise RuntimeError(
-                "Qlik export URL was not returned."
+                "Qlik export Location header is missing."
             )
 
         if download_url.startswith("/"):
             download_url = tenant + download_url
 
+        parsed_url = urlparse(download_url)
+
+        if parsed_url.scheme != "https":
+            raise RuntimeError(
+                "Unexpected QVF download URL scheme."
+            )
+
+        tenant_host = urlparse(tenant).netloc
+
+        download_headers = {}
+
+        # Send the OAuth token only to the Qlik tenant host.
+        if parsed_url.netloc == tenant_host:
+            download_headers["Authorization"] = (
+                f"Bearer {token}"
+            )
+
         download_request = urllib.request.Request(
             download_url,
-            headers={
-                "Authorization": f"Bearer {token}"
-            }
+            headers=download_headers
         )
 
         with urllib.request.urlopen(
