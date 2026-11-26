@@ -13,14 +13,17 @@ jobs:
       app_id: ${{ steps.find_app.outputs.app_id }}
 
     steps:
+      # Step 1: Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Step 2: Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # Step 3: Qlik OAuth Authentication
       - name: Get Qlik OAuth Access Token
         id: oauth
         env:
@@ -32,9 +35,13 @@ jobs:
           import os
           import json
           import urllib.request
+          import urllib.parse
           import urllib.error
 
           tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
+
+          if not tenant.startswith("https://"):
+              raise SystemExit("ERROR: Invalid Qlik tenant URL")
 
           payload = {
               "client_id": os.environ["QLIK_CLIENT_ID"],
@@ -42,11 +49,14 @@ jobs:
               "grant_type": "client_credentials"
           }
 
+          data = urllib.parse.urlencode(payload).encode("utf-8")
+
           request = urllib.request.Request(
               f"{tenant}/oauth/token",
-              data=urllib.parse.urlencode(payload).encode(),
+              data=data,
               headers={
-                  "Content-Type": "application/x-www-form-urlencoded"
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Accept": "application/json"
               },
               method="POST"
           )
@@ -63,30 +73,36 @@ jobs:
               with open(os.environ["GITHUB_ENV"], "a") as file:
                   file.write(f"QLIK_ACCESS_TOKEN={token}\n")
 
-              print("OAuth authentication successful.")
+              print("SUCCESS: OAuth authentication completed.")
 
           except urllib.error.HTTPError as error:
               raise SystemExit(
-                  f"OAuth failed. HTTP status: {error.code}"
+                  f"OAuth authentication failed. HTTP {error.code}"
+              )
+
+          except Exception as error:
+              raise SystemExit(
+                  f"OAuth error: {type(error).__name__}"
               )
           PY
 
+      # Step 4: Dynamic Base App Discovery
       - name: Discover Base Application
         id: find_app
         env:
           QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
-          QLIK_ACCESS_TOKEN: ${{ env.QLIK_ACCESS_TOKEN }}
         run: |
-          python .github/generator/get_base_app.py
+          python .github/scripts/get_base_app.py
 
-      - name: Display Discovery Result
+      # Step 5: Validate Discovery Result
+      - name: Validate Base App Discovery
         env:
           APP_ID: ${{ steps.find_app.outputs.app_id }}
         run: |
           if [ -z "$APP_ID" ]; then
-            echo "Base App ID was not returned."
+            echo "ERROR: Base App ID not found."
             exit 1
           fi
 
-          echo "Base Application discovery successful."
+          echo "SUCCESS: Base Application discovered."
           echo "App ID retrieved successfully."
