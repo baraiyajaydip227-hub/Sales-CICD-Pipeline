@@ -1,0 +1,28 @@
+
+LIB CONNECT TO 'Sales_BI_Connection';
+
+Sales:
+LOAD
+    OrderID,
+    OrderDate,
+    City,
+    Category,
+    Product,
+    Quantity,
+    UnitPrice,
+    SalesAmount;
+
+SQL SELECT
+    OrderID,
+    OrderDate,
+    City,
+    Category,
+    Product,
+    Quantity,
+    UnitPrice,
+    SalesAmount
+FROM vw_sales;
+
+STORE Sales INTO [lib://Sales_QVD/Sales.qvd] (qvd);
+
+DROP TABLE Sales;
