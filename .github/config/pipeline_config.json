@@ -1,3 +1,4 @@
+
 {
   "project": {
     "name": "Sales-CICD-Pipeline",
@@ -7,6 +8,10 @@
     "qvd_name": "Sales_Curated.qvd",
     "bi_view_path": "sql/bi_views/",
     "erd_file": "Sales_ERD.md"
+  },
+  "connections": {
+    "bi_connection": "Sales_BI_Connection",
+    "qvd_connection": "Sales_QVD"
   },
   "environments": [
     "SBX",
