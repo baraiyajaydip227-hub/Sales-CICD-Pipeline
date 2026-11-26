@@ -1,0 +1,71 @@
+
+name: Qlik OAuth Authentication Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  authenticate:
+    name: Test Qlik Cloud OAuth
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Authenticate with Qlik Cloud
+        env:
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          QLIK_CLIENT_ID: ${{ secrets.QLIK_CLIENT_ID }}
+          QLIK_CLIENT_SECRET: ${{ secrets.QLIK_CLIENT_SECRET }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          import urllib.request
+          import urllib.error
+
+          tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
+          client_id = os.environ["QLIK_CLIENT_ID"]
+          client_secret = os.environ["QLIK_CLIENT_SECRET"]
+
+          if not tenant.startswith("https://"):
+              raise SystemExit("ERROR: Invalid tenant URL")
+
+          url = f"{tenant}/oauth/token"
+
+          payload = {
+              "client_id": client_id,
+              "client_secret": client_secret,
+              "grant_type": "client_credentials"
+          }
+
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
+              },
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+
+              if not result.get("access_token"):
+                  raise SystemExit("ERROR: Access token not received")
+
+              print("SUCCESS: Qlik Cloud OAuth authentication completed.")
+              print("Access token received successfully.")
+
+          except urllib.error.HTTPError as error:
+              print(f"ERROR: Qlik OAuth returned HTTP {error.code}")
+              raise SystemExit(1)
+          except Exception as error:
+              print(f"ERROR: Authentication failed: {type(error).__name__}")
+              raise SystemExit(1)
+          PY
