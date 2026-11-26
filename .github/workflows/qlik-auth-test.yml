@@ -1,127 +1,124 @@
 
-name: Qlik No-Data QVF Build
+import json
+import os
+import sys
+import urllib.request
+import urllib.parse
+import urllib.error
+from pathlib import Path
 
-on:
-  workflow_dispatch:
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG_PATH = ROOT / ".github/config/pipeline_config.json"
 
-permissions:
-  contents: read
 
-jobs:
-  build-qvf:
-    name: Discover and Export QVF
-    runs-on: ubuntu-latest
+def main():
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"Config not found: {CONFIG_PATH}"
+        )
 
-    outputs:
-      app_id: ${{ steps.find_app.outputs.app_id }}
-      qvf_path: ${{ steps.export_qvf.outputs.qvf_path }}
+    with open(CONFIG_PATH, encoding="utf-8") as file:
+        config = json.load(file)
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    app_name = config["project"]["base_app"]
+    tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
+    token = os.environ["QLIK_ACCESS_TOKEN"]
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    params = urllib.parse.urlencode({
+        "resourceType": "app",
+        "name": app_name,
+        "limit": 100,
+        "noActions": "true"
+    })
 
-      - name: Get Qlik OAuth Access Token
-        id: oauth
-        env:
-          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
-          QLIK_CLIENT_ID: ${{ secrets.QLIK_CLIENT_ID }}
-          QLIK_CLIENT_SECRET: ${{ secrets.QLIK_CLIENT_SECRET }}
-        run: |
-          python - <<'PY'
-          import os
-          import json
-          import base64
-          import urllib.request
-          import urllib.parse
+    url = f"{tenant}/api/v1/items?{params}"
 
-          tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        },
+        method="GET"
+    )
 
-          payload = {
-              "client_id": os.environ["QLIK_CLIENT_ID"],
-              "client_secret": os.environ["QLIK_CLIENT_SECRET"],
-              "grant_type": "client_credentials"
-          }
+    print("Checking Qlik Base Application...")
+    print(f"Expected App Name: {app_name}")
 
-          request = urllib.request.Request(
-              f"{tenant}/oauth/token",
-              data=urllib.parse.urlencode(payload).encode(),
-              headers={
-                  "Content-Type": "application/x-www-form-urlencoded"
-              },
-              method="POST"
-          )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=30
+        ) as response:
+            result = json.loads(response.read())
 
-          with urllib.request.urlopen(request, timeout=30) as response:
-              result = json.loads(response.read())
+        items = result.get("data", [])
 
-          token = result.get("access_token")
+        print(f"API Returned Items: {len(items)}")
 
-          if not token:
-              raise SystemExit("OAuth token not received.")
+        # Diagnostic information only; no secrets are printed.
+        for item in items:
+            print(
+                "Found Item:",
+                "Name =", item.get("name"),
+                "| Resource Type =", item.get("resourceType"),
+                "| Resource ID Available =",
+                bool(item.get("resourceId"))
+            )
 
-          # Inspect OAuth token claims without printing the token
-          parts = token.split(".")
+        matches = [
+            item for item in items
+            if item.get("name") == app_name
+            and item.get("resourceType") == "app"
+        ]
 
-          if len(parts) == 3:
-              payload_part = parts[1]
-              payload_part += "=" * (-len(payload_part) % 4)
+        if len(matches) == 0:
+            print("\nBase application was not found.")
+            print(
+                "Check the OAuth read scope and app visibility."
+            )
+            raise RuntimeError(
+                f"Base app not found: {app_name}"
+            )
 
-              claims = json.loads(
-                  base64.urlsafe_b64decode(payload_part)
-              )
+        if len(matches) > 1:
+            raise RuntimeError(
+                f"Multiple apps found with name: {app_name}"
+            )
 
-              print("OAuth Granted Scopes:")
-              print(claims.get("scope", "Scope claim not found"))
+        app_id = matches[0].get("resourceId")
 
-              print("OAuth Token Issuer:")
-              print(claims.get("iss", "Not available"))
+        if not app_id:
+            raise RuntimeError(
+                "App ID not returned by Qlik API."
+            )
 
-              print("OAuth Token Audience:")
-              print(claims.get("aud", "Not available"))
-          else:
-              print(
-                  "OAuth token is opaque; JWT scope inspection unavailable."
-              )
+        print(f"\nBase Application found: {app_name}")
+        print("App ID retrieved successfully.")
 
-          # Pass token securely to subsequent workflow steps
-          with open(os.environ["GITHUB_ENV"], "a") as file:
-              file.write(f"QLIK_ACCESS_TOKEN={token}\n")
+        github_output = os.environ.get("GITHUB_OUTPUT")
 
-          print("OAuth authentication successful.")
-          PY
+        if github_output:
+            with open(
+                github_output, "a", encoding="utf-8"
+            ) as file:
+                file.write(f"app_id={app_id}\n")
 
-      - name: Discover Base Application
-        id: find_app
-        env:
-          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
-        run: |
-          python .github/scripts/get_base_app.py
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode(
+            "utf-8", errors="replace"
+        )
 
-      - name: Export No-Data QVF
-        id: export_qvf
-        env:
-          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
-          QLIK_APP_ID: ${{ steps.find_app.outputs.app_id }}
-        run: |
-          python .github/generator/export_qvf.py
+        print(f"Qlik API HTTP Error: {error.code}")
+        print(f"Qlik API Response: {error_body}")
 
-      - name: Upload QVF Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Sales-QVF-Build-${{ github.run_number }}
-          path: ${{ steps.export_qvf.outputs.qvf_path }}
-          if-no-files-found: error
-          retention-days: 30
+        raise RuntimeError(
+            "Unable to discover Qlik base application."
+        )
 
-      - name: Build Summary
-        if: success()
-        run: |
-          echo "QVF Build Successful."
-          echo "Base Application: Sales_RAW_Ingestion"
-          echo "No-Data Export: Enabled"
-          echo "Versioned Artifact: Uploaded"
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(f"ERROR: {error}")
+        sys.exit(1)
