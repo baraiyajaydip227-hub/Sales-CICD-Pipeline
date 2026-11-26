@@ -25,83 +25,36 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Get Qlik OAuth Access Token
-        id: oauth
+      # Step 1: Configure Qlik API Key
+      - name: Get Qlik API Access
+        id: api_auth
         env:
-          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
-          QLIK_CLIENT_ID: ${{ secrets.QLIK_CLIENT_ID }}
-          QLIK_CLIENT_SECRET: ${{ secrets.QLIK_CLIENT_SECRET }}
+          QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
         run: |
           python - <<'PY'
           import os
-          import json
-          import urllib.request
-          import urllib.parse
-          import urllib.error
+          import sys
 
-          tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
+          api_key = os.environ.get("QLIK_API_KEY")
 
-          payload = {
-              "client_id": os.environ["QLIK_CLIENT_ID"],
-              "client_secret": os.environ["QLIK_CLIENT_SECRET"],
-              "grant_type": "client_credentials",
-              "scope": "admin.apps"
-          }
+          if not api_key:
+              print("ERROR: QLIK_API_KEY is missing.")
+              sys.exit(1)
 
-          request = urllib.request.Request(
-              f"{tenant}/oauth/token",
-              data=urllib.parse.urlencode(payload).encode(),
-              headers={
-                  "Content-Type": "application/x-www-form-urlencoded",
-                  "Accept": "application/json"
-              },
-              method="POST"
-          )
-
-          try:
-              with urllib.request.urlopen(
-                  request, timeout=30
-              ) as response:
-                  result = json.loads(response.read())
-
-          except urllib.error.HTTPError as error:
-              error_body = error.read().decode(
-                  "utf-8", errors="replace"
-              )
-              print(f"OAuth HTTP Error: {error.code}")
-              print(f"OAuth Response: {error_body}")
-              raise SystemExit("OAuth authentication failed.")
-
-          token = result.get("access_token")
-
-          if not token:
-              raise SystemExit("OAuth token not received.")
-
-          # Read actual granted scopes from OAuth response
-          granted_scopes = result.get("scope")
-
-          print("OAuth Granted Scopes:")
-
-          if granted_scopes:
-              print(granted_scopes)
-          else:
-              print("Scope field not returned by OAuth response.")
-
-          print("OAuth Token Issuer:")
-          print("Token received successfully.")
-
-          print("OAuth Token Audience:")
-          print("Tenant:", tenant)
-
-          # Store token securely for later workflow steps
           with open(
-              os.environ["GITHUB_ENV"], "a", encoding="utf-8"
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8"
           ) as file:
-              file.write(f"QLIK_ACCESS_TOKEN={token}\n")
+              file.write(
+                  f"QLIK_ACCESS_TOKEN={api_key}\n"
+              )
 
-          print("OAuth authentication successful.")
+          print("Qlik API authentication configured.")
+          print("API Key received successfully.")
           PY
 
+      # Step 2: Discover Base Application
       - name: Discover Base Application
         id: find_app
         env:
@@ -109,6 +62,7 @@ jobs:
         run: |
           python .github/scripts/get_base_app.py
 
+      # Step 3: Export No-Data QVF
       - name: Export No-Data QVF
         id: export_qvf
         env:
@@ -117,6 +71,7 @@ jobs:
         run: |
           python .github/generator/export_qvf.py
 
+      # Step 4: Upload QVF Artifact
       - name: Upload QVF Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -125,10 +80,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Step 5: Build Summary
       - name: Build Summary
         if: success()
         run: |
           echo "QVF Build Successful."
           echo "Base Application: Sales_RAW_Ingestion"
+          echo "Authentication: Qlik API Key"
           echo "No-Data Export: Enabled"
           echo "Versioned Artifact: Uploaded"
