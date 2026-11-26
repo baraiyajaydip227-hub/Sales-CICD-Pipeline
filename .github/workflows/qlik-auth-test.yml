@@ -35,61 +35,68 @@ jobs:
           python - <<'PY'
           import os
           import json
-          import base64
           import urllib.request
           import urllib.parse
+          import urllib.error
 
           tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
 
           payload = {
               "client_id": os.environ["QLIK_CLIENT_ID"],
               "client_secret": os.environ["QLIK_CLIENT_SECRET"],
-              "grant_type": "client_credentials"
+              "grant_type": "client_credentials",
+              "scope": "admin.apps"
           }
 
           request = urllib.request.Request(
               f"{tenant}/oauth/token",
               data=urllib.parse.urlencode(payload).encode(),
               headers={
-                  "Content-Type": "application/x-www-form-urlencoded"
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Accept": "application/json"
               },
               method="POST"
           )
 
-          with urllib.request.urlopen(request, timeout=30) as response:
-              result = json.loads(response.read())
+          try:
+              with urllib.request.urlopen(
+                  request, timeout=30
+              ) as response:
+                  result = json.loads(response.read())
+
+          except urllib.error.HTTPError as error:
+              error_body = error.read().decode(
+                  "utf-8", errors="replace"
+              )
+              print(f"OAuth HTTP Error: {error.code}")
+              print(f"OAuth Response: {error_body}")
+              raise SystemExit("OAuth authentication failed.")
 
           token = result.get("access_token")
 
           if not token:
               raise SystemExit("OAuth token not received.")
 
-          # Inspect OAuth token claims without printing the token
-          parts = token.split(".")
+          # Read actual granted scopes from OAuth response
+          granted_scopes = result.get("scope")
 
-          if len(parts) == 3:
-              payload_part = parts[1]
-              payload_part += "=" * (-len(payload_part) % 4)
+          print("OAuth Granted Scopes:")
 
-              claims = json.loads(
-                  base64.urlsafe_b64decode(payload_part)
-              )
-
-              print("OAuth Granted Scopes:")
-              print(claims.get("scope", "Scope claim not found"))
-
-              print("OAuth Token Issuer:")
-              print(claims.get("iss", "Not available"))
-
-              print("OAuth Token Audience:")
-              print(claims.get("aud", "Not available"))
+          if granted_scopes:
+              print(granted_scopes)
           else:
-              print(
-                  "OAuth token is opaque; JWT scope inspection unavailable."
-              )
+              print("Scope field not returned by OAuth response.")
 
-          # Pass token securely to subsequent workflow steps
-          with open(os.environ["GITHUB_ENV"], "a") as file:
+          print("OAuth Token Issuer:")
+          print("Token received successfully.")
+
+          print("OAuth Token Audience:")
+          print("Tenant:", tenant)
+
+          # Store token securely for later workflow steps
+          with open(
+              os.environ["GITHUB_ENV"], "a", encoding="utf-8"
+          ) as file:
               file.write(f"QLIK_ACCESS_TOKEN={token}\n")
 
           print("OAuth authentication successful.")
