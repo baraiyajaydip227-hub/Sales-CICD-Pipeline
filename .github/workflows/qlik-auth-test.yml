@@ -17,17 +17,14 @@ jobs:
       qvf_path: ${{ steps.export_qvf.outputs.qvf_path }}
 
     steps:
-      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # 3. OAuth Authentication
       - name: Get Qlik OAuth Access Token
         id: oauth
         env:
@@ -38,6 +35,7 @@ jobs:
           python - <<'PY'
           import os
           import json
+          import base64
           import urllib.request
           import urllib.parse
 
@@ -66,13 +64,37 @@ jobs:
           if not token:
               raise SystemExit("OAuth token not received.")
 
+          # Inspect OAuth token claims without printing the token
+          parts = token.split(".")
+
+          if len(parts) == 3:
+              payload_part = parts[1]
+              payload_part += "=" * (-len(payload_part) % 4)
+
+              claims = json.loads(
+                  base64.urlsafe_b64decode(payload_part)
+              )
+
+              print("OAuth Granted Scopes:")
+              print(claims.get("scope", "Scope claim not found"))
+
+              print("OAuth Token Issuer:")
+              print(claims.get("iss", "Not available"))
+
+              print("OAuth Token Audience:")
+              print(claims.get("aud", "Not available"))
+          else:
+              print(
+                  "OAuth token is opaque; JWT scope inspection unavailable."
+              )
+
+          # Pass token securely to subsequent workflow steps
           with open(os.environ["GITHUB_ENV"], "a") as file:
               file.write(f"QLIK_ACCESS_TOKEN={token}\n")
 
           print("OAuth authentication successful.")
           PY
 
-      # 4. Dynamic Base App Discovery
       - name: Discover Base Application
         id: find_app
         env:
@@ -80,7 +102,6 @@ jobs:
         run: |
           python .github/scripts/get_base_app.py
 
-      # 5. Export No-Data QVF
       - name: Export No-Data QVF
         id: export_qvf
         env:
@@ -89,7 +110,6 @@ jobs:
         run: |
           python .github/generator/export_qvf.py
 
-      # 6. Upload Versioned QVF Artifact
       - name: Upload QVF Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -98,8 +118,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # 7. Final Validation
       - name: Build Summary
+        if: success()
         run: |
           echo "QVF Build Successful."
           echo "Base Application: Sales_RAW_Ingestion"
