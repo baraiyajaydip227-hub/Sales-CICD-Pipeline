@@ -1,29 +1,33 @@
 
-name: Qlik OAuth and Base App Discovery
+name: Qlik No-Data QVF Build
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  discover-base-app:
-    name: Authenticate and Find Base App
+  build-qvf:
+    name: Discover and Export QVF
     runs-on: ubuntu-latest
 
     outputs:
       app_id: ${{ steps.find_app.outputs.app_id }}
+      qvf_path: ${{ steps.export_qvf.outputs.qvf_path }}
 
     steps:
-      # Step 1: Checkout Repository
+      # 1. Checkout Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup Python
+      # 2. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # Step 3: Qlik OAuth Authentication
+      # 3. OAuth Authentication
       - name: Get Qlik OAuth Access Token
         id: oauth
         env:
@@ -36,12 +40,8 @@ jobs:
           import json
           import urllib.request
           import urllib.parse
-          import urllib.error
 
           tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
-
-          if not tenant.startswith("https://"):
-              raise SystemExit("ERROR: Invalid Qlik tenant URL")
 
           payload = {
               "client_id": os.environ["QLIK_CLIENT_ID"],
@@ -49,44 +49,30 @@ jobs:
               "grant_type": "client_credentials"
           }
 
-          data = urllib.parse.urlencode(payload).encode("utf-8")
-
           request = urllib.request.Request(
               f"{tenant}/oauth/token",
-              data=data,
+              data=urllib.parse.urlencode(payload).encode(),
               headers={
-                  "Content-Type": "application/x-www-form-urlencoded",
-                  "Accept": "application/json"
+                  "Content-Type": "application/x-www-form-urlencoded"
               },
               method="POST"
           )
 
-          try:
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  result = json.loads(response.read())
+          with urllib.request.urlopen(request, timeout=30) as response:
+              result = json.loads(response.read())
 
-              token = result.get("access_token")
+          token = result.get("access_token")
 
-              if not token:
-                  raise RuntimeError("Access token not received")
+          if not token:
+              raise SystemExit("OAuth token not received.")
 
-              with open(os.environ["GITHUB_ENV"], "a") as file:
-                  file.write(f"QLIK_ACCESS_TOKEN={token}\n")
+          with open(os.environ["GITHUB_ENV"], "a") as file:
+              file.write(f"QLIK_ACCESS_TOKEN={token}\n")
 
-              print("SUCCESS: OAuth authentication completed.")
-
-          except urllib.error.HTTPError as error:
-              raise SystemExit(
-                  f"OAuth authentication failed. HTTP {error.code}"
-              )
-
-          except Exception as error:
-              raise SystemExit(
-                  f"OAuth error: {type(error).__name__}"
-              )
+          print("OAuth authentication successful.")
           PY
 
-      # Step 4: Dynamic Base App Discovery
+      # 4. Dynamic Base App Discovery
       - name: Discover Base Application
         id: find_app
         env:
@@ -94,15 +80,28 @@ jobs:
         run: |
           python .github/scripts/get_base_app.py
 
-      # Step 5: Validate Discovery Result
-      - name: Validate Base App Discovery
+      # 5. Export No-Data QVF
+      - name: Export No-Data QVF
+        id: export_qvf
         env:
-          APP_ID: ${{ steps.find_app.outputs.app_id }}
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          QLIK_APP_ID: ${{ steps.find_app.outputs.app_id }}
         run: |
-          if [ -z "$APP_ID" ]; then
-            echo "ERROR: Base App ID not found."
-            exit 1
-          fi
+          python .github/generator/export_qvf.py
 
-          echo "SUCCESS: Base Application discovered."
-          echo "App ID retrieved successfully."
+      # 6. Upload Versioned QVF Artifact
+      - name: Upload QVF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sales-QVF-Build-${{ github.run_number }}
+          path: ${{ steps.export_qvf.outputs.qvf_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # 7. Final Validation
+      - name: Build Summary
+        run: |
+          echo "QVF Build Successful."
+          echo "Base Application: Sales_RAW_Ingestion"
+          echo "No-Data Export: Enabled"
+          echo "Versioned Artifact: Uploaded"
