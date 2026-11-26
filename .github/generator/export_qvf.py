@@ -22,6 +22,51 @@ def load_config():
         return json.load(file)
 
 
+def check_app_privileges(tenant, token, app_id):
+    print("\nChecking Qlik Application Permissions...")
+
+    check_url = f"{tenant}/api/v1/apps/{app_id}"
+
+    check_request = urllib.request.Request(
+        check_url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        },
+        method="GET"
+    )
+
+    try:
+        with urllib.request.urlopen(
+            check_request, timeout=30
+        ) as response:
+            app_info = json.loads(response.read())
+
+        privileges = app_info.get("privileges", [])
+
+        print("App Permission Check:")
+        print(f"Available Privileges: {privileges}")
+        print(
+            f"Export Permission: {'export' in privileges}"
+        )
+
+        return privileges
+
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode(
+            "utf-8", errors="replace"
+        )
+
+        print(
+            f"App Permission Check Failed: HTTP {error.code}"
+        )
+        print(f"Qlik API Error: {error_body}")
+
+        raise RuntimeError(
+            "Unable to verify Qlik application permissions."
+        )
+
+
 def export_qvf():
     config = load_config()
 
@@ -30,7 +75,9 @@ def export_qvf():
     app_id = os.environ["QLIK_APP_ID"]
 
     if not app_id:
-        raise RuntimeError("Dynamic Base App ID is missing.")
+        raise RuntimeError(
+            "Dynamic Base App ID is missing."
+        )
 
     app_name = config["project"]["base_app"]
 
@@ -39,6 +86,18 @@ def export_qvf():
             "No-data export must be enabled."
         )
 
+    print("Starting Qlik Cloud QVF export...")
+    print(f"Base Application: {app_name}")
+    print("No-Data Export: Enabled")
+
+    # Step 1: Check actual app privileges
+    privileges = check_app_privileges(
+        tenant,
+        token,
+        app_id
+    )
+
+    # Step 2: Start QVF export
     export_url = (
         f"{tenant}/api/v1/apps/{app_id}/export?NoData=true"
     )
@@ -53,9 +112,7 @@ def export_qvf():
         method="POST"
     )
 
-    print("Starting Qlik Cloud QVF export...")
-    print(f"Base Application: {app_name}")
-    print("No-Data Export: Enabled")
+    print("\nStarting export request...")
 
     try:
         with urllib.request.urlopen(
@@ -82,7 +139,6 @@ def export_qvf():
 
         download_headers = {}
 
-        # Send the OAuth token only to the Qlik tenant host.
         if parsed_url.netloc == tenant_host:
             download_headers["Authorization"] = (
                 f"Bearer {token}"
@@ -103,6 +159,7 @@ def export_qvf():
                 "Exported QVF file is empty."
             )
 
+        # Step 3: Save versioned QVF artifact
         version = os.environ.get(
             "GITHUB_RUN_NUMBER", "local"
         )
@@ -117,7 +174,8 @@ def export_qvf():
 
         output_dir = ROOT / "dist"
         output_dir.mkdir(
-            parents=True, exist_ok=True
+            parents=True,
+            exist_ok=True
         )
 
         filename = (
@@ -127,7 +185,7 @@ def export_qvf():
         output_path = output_dir / filename
         output_path.write_bytes(qvf_data)
 
-        print("QVF export successful.")
+        print("\nQVF export successful.")
         print(f"Artifact: {filename}")
         print(f"Size: {len(qvf_data)} bytes")
 
@@ -135,7 +193,9 @@ def export_qvf():
 
         if github_output:
             with open(
-                github_output, "a", encoding="utf-8"
+                github_output,
+                "a",
+                encoding="utf-8"
             ) as file:
                 file.write(
                     f"qvf_path=dist/{filename}\n"
@@ -143,7 +203,8 @@ def export_qvf():
 
     except urllib.error.HTTPError as error:
         error_body = error.read().decode(
-            "utf-8", errors="replace"
+            "utf-8",
+            errors="replace"
         )
 
         print(f"HTTP Status: {error.code}")
