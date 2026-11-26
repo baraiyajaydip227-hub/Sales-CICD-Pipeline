@@ -1,0 +1,24 @@
+{
+  "project": {
+    "name": "Sales-CICD-Pipeline",
+    "base_app": "Sales_RAW_Ingestion"
+  },
+  "source": {
+    "qvd_name": "Sales_Curated.qvd",
+    "bi_view_path": "sql/bi_views/",
+    "erd_file": "Sales_ERD.md"
+  },
+  "environments": [
+    "SBX",
+    "DEV",
+    "UAT",
+    "PROD"
+  ],
+  "deployment": {
+    "artifact_type": "QVF",
+    "no_data": true,
+    "promote_same_artifact": true,
+    "uat_approval_required": true,
+    "prod_manual_approval": true
+  }
+}
