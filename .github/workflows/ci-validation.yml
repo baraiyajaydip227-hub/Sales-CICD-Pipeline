@@ -1,0 +1,17 @@
+name: CI Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Repository
+        run: echo "Repository validation started"
