@@ -1,3 +1,4 @@
+
 name: Qlik CI Validation
 
 on:
@@ -23,4 +24,4 @@ jobs:
           python-version: "3.12"
 
       - name: Validate Pipeline Configuration
-        run: python scripts/validate_config.py
+        run: python .github/scripts/validate_config.py
