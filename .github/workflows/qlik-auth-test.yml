@@ -1,21 +1,28 @@
 
-name: Qlik OAuth Authentication Test
+name: Qlik OAuth and Base App Discovery
 
 on:
   workflow_dispatch:
 
 jobs:
-  authenticate:
-    name: Test Qlik Cloud OAuth
+  discover-base-app:
+    name: Authenticate and Find Base App
     runs-on: ubuntu-latest
 
+    outputs:
+      app_id: ${{ steps.find_app.outputs.app_id }}
+
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Authenticate with Qlik Cloud
+      - name: Get Qlik OAuth Access Token
+        id: oauth
         env:
           QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
           QLIK_CLIENT_ID: ${{ secrets.QLIK_CLIENT_ID }}
@@ -28,44 +35,58 @@ jobs:
           import urllib.error
 
           tenant = os.environ["QLIK_TENANT_URL"].rstrip("/")
-          client_id = os.environ["QLIK_CLIENT_ID"]
-          client_secret = os.environ["QLIK_CLIENT_SECRET"]
-
-          if not tenant.startswith("https://"):
-              raise SystemExit("ERROR: Invalid tenant URL")
-
-          url = f"{tenant}/oauth/token"
 
           payload = {
-              "client_id": client_id,
-              "client_secret": client_secret,
+              "client_id": os.environ["QLIK_CLIENT_ID"],
+              "client_secret": os.environ["QLIK_CLIENT_SECRET"],
               "grant_type": "client_credentials"
           }
 
           request = urllib.request.Request(
-              url,
-              data=json.dumps(payload).encode("utf-8"),
+              f"{tenant}/oauth/token",
+              data=urllib.parse.urlencode(payload).encode(),
               headers={
-                  "Content-Type": "application/json",
-                  "Accept": "application/json"
+                  "Content-Type": "application/x-www-form-urlencoded"
               },
               method="POST"
           )
 
           try:
               with urllib.request.urlopen(request, timeout=30) as response:
-                  result = json.loads(response.read().decode("utf-8"))
+                  result = json.loads(response.read())
 
-              if not result.get("access_token"):
-                  raise SystemExit("ERROR: Access token not received")
+              token = result.get("access_token")
 
-              print("SUCCESS: Qlik Cloud OAuth authentication completed.")
-              print("Access token received successfully.")
+              if not token:
+                  raise RuntimeError("Access token not received")
+
+              with open(os.environ["GITHUB_ENV"], "a") as file:
+                  file.write(f"QLIK_ACCESS_TOKEN={token}\n")
+
+              print("OAuth authentication successful.")
 
           except urllib.error.HTTPError as error:
-              print(f"ERROR: Qlik OAuth returned HTTP {error.code}")
-              raise SystemExit(1)
-          except Exception as error:
-              print(f"ERROR: Authentication failed: {type(error).__name__}")
-              raise SystemExit(1)
+              raise SystemExit(
+                  f"OAuth failed. HTTP status: {error.code}"
+              )
           PY
+
+      - name: Discover Base Application
+        id: find_app
+        env:
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          QLIK_ACCESS_TOKEN: ${{ env.QLIK_ACCESS_TOKEN }}
+        run: |
+          python .github/generator/get_base_app.py
+
+      - name: Display Discovery Result
+        env:
+          APP_ID: ${{ steps.find_app.outputs.app_id }}
+        run: |
+          if [ -z "$APP_ID" ]; then
+            echo "Base App ID was not returned."
+            exit 1
+          fi
+
+          echo "Base Application discovery successful."
+          echo "App ID retrieved successfully."
