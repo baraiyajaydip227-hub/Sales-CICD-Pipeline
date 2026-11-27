@@ -1,29 +1,23 @@
 
-name: Qlik No-Data QVF Build and DEV Deployment
+name: Qlik No-Data QVF Build and Deploy
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
 
-  # ==========================================
   # JOB 1: BUILD QVF
-  # ==========================================
-
   build-qvf:
     name: Discover and Export QVF
     runs-on: ubuntu-latest
 
     outputs:
       app_id: ${{ steps.find_app.outputs.app_id }}
-      qvf_path: ${{ steps.export_qvf.outputs.qvf_path }}
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -32,7 +26,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Get Qlik API Access
+      - name: Configure Qlik API Key
         env:
           QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
         run: |
@@ -40,13 +34,13 @@ jobs:
           import os
           import sys
 
-          api_key = os.environ.get("QLIK_API_KEY")
+          key = os.environ.get("QLIK_API_KEY")
 
-          if not api_key:
+          if not key:
               sys.exit("QLIK_API_KEY is missing.")
 
-          with open(os.environ["GITHUB_ENV"], "a") as file:
-              file.write(f"QLIK_ACCESS_TOKEN={api_key}\n")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"QLIK_ACCESS_TOKEN={key}\n")
 
           print("Qlik API authentication successful.")
           PY
@@ -77,21 +71,15 @@ jobs:
       - name: Build Summary
         run: |
           echo "QVF Build Successful."
-          echo "Base Application: Sales_RAW_Ingestion"
-          echo "No-Data Export: Enabled"
-          echo "Artifact Uploaded Successfully."
+          echo "Artifact uploaded successfully."
 
-  # ==========================================
-  # JOB 2: DEPLOY QVF TO DEV
-  # ==========================================
-
+  # JOB 2: DEPLOY TO DEV
   deploy-dev:
     name: Deploy QVF to DEV
     runs-on: ubuntu-latest
     needs: build-qvf
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -106,7 +94,7 @@ jobs:
           name: Sales-QVF-Build-${{ github.run_number }}
           path: dist
 
-      - name: Configure Qlik API Access
+      - name: Configure Qlik API Key
         env:
           QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
         run: |
@@ -114,15 +102,15 @@ jobs:
           import os
           import sys
 
-          api_key = os.environ.get("QLIK_API_KEY")
+          key = os.environ.get("QLIK_API_KEY")
 
-          if not api_key:
+          if not key:
               sys.exit("QLIK_API_KEY is missing.")
 
-          with open(os.environ["GITHUB_ENV"], "a") as file:
-              file.write(f"QLIK_ACCESS_TOKEN={api_key}\n")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"QLIK_ACCESS_TOKEN={key}\n")
 
-          print("Qlik API authentication configured.")
+          print("Qlik API authentication successful.")
           PY
 
       - name: Deploy QVF to DEV
@@ -139,4 +127,3 @@ jobs:
           echo "DEV Deployment Successful."
           echo "Environment: DEV"
           echo "Application ID: ${{ steps.deploy.outputs.app_id }}"
-          echo "QVF Artifact: Same Build Artifact"
