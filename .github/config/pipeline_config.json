@@ -19,6 +19,12 @@
     "UAT",
     "PROD"
   ],
+  "space_ids": {
+    "SBX": "6b07e76a3cb3d1a70bf4f769",
+    "DEV": "6b07e72749b620f2cf60c3fd",
+    "UAT": "6b07e77c3cb3d1a70bf4f770",
+    "PROD": "6b07e78f6a136a0488dd9408"
+  },
   "deployment": {
     "artifact_type": "QVF",
     "no_data": true,
