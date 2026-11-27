@@ -1,0 +1,92 @@
+
+name: Qlik UAT Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Successful QVF Build Run ID"
+        required: true
+        type: string
+
+      artifact_name:
+        description: "QVF Artifact Name"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy-uat:
+    name: Deploy QVF to UAT
+    runs-on: ubuntu-latest
+
+    environment:
+      name: UAT
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download Existing QVF Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: Verify QVF Artifact
+        run: |
+          echo "Checking QVF Artifact..."
+
+          find dist -type f -name "*.qvf"
+
+          if ! find dist -type f -name "*.qvf" | grep -q .; then
+            echo "ERROR: QVF Artifact not found."
+            exit 1
+          fi
+
+          echo "QVF Artifact verified."
+
+      - name: Configure Qlik API Key
+        env:
+          QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          key = os.environ.get("QLIK_API_KEY")
+
+          if not key:
+              sys.exit("QLIK_API_KEY is missing.")
+
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"QLIK_ACCESS_TOKEN={key}\n")
+
+          print("Qlik API authentication successful.")
+          PY
+
+      - name: Deploy QVF to UAT
+        id: deploy
+        env:
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          TARGET_ENV: UAT
+        run: |
+          python .github/generator/deploy_qvf.py
+
+      - name: UAT Deployment Summary
+        if: success()
+        run: |
+          echo "UAT Deployment Successful."
+          echo "Environment: UAT"
+          echo "Application ID: ${{ steps.deploy.outputs.app_id }}"
+          echo "Artifact: ${{ inputs.artifact_name }}"
