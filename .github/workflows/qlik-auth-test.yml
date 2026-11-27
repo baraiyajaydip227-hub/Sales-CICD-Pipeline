@@ -1,13 +1,19 @@
 
-name: Qlik No-Data QVF Build
+name: Qlik No-Data QVF Build and DEV Deployment
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+
+  # ==========================================
+  # JOB 1: BUILD QVF
+  # ==========================================
+
   build-qvf:
     name: Discover and Export QVF
     runs-on: ubuntu-latest
@@ -17,6 +23,7 @@ jobs:
       qvf_path: ${{ steps.export_qvf.outputs.qvf_path }}
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -25,9 +32,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Step 1: Configure Qlik API Key
       - name: Get Qlik API Access
-        id: api_auth
         env:
           QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
         run: |
@@ -38,23 +43,14 @@ jobs:
           api_key = os.environ.get("QLIK_API_KEY")
 
           if not api_key:
-              print("ERROR: QLIK_API_KEY is missing.")
-              sys.exit(1)
+              sys.exit("QLIK_API_KEY is missing.")
 
-          with open(
-              os.environ["GITHUB_ENV"],
-              "a",
-              encoding="utf-8"
-          ) as file:
-              file.write(
-                  f"QLIK_ACCESS_TOKEN={api_key}\n"
-              )
+          with open(os.environ["GITHUB_ENV"], "a") as file:
+              file.write(f"QLIK_ACCESS_TOKEN={api_key}\n")
 
-          print("Qlik API authentication configured.")
-          print("API Key received successfully.")
+          print("Qlik API authentication successful.")
           PY
 
-      # Step 2: Discover Base Application
       - name: Discover Base Application
         id: find_app
         env:
@@ -62,7 +58,6 @@ jobs:
         run: |
           python .github/scripts/get_base_app.py
 
-      # Step 3: Export No-Data QVF
       - name: Export No-Data QVF
         id: export_qvf
         env:
@@ -71,7 +66,6 @@ jobs:
         run: |
           python .github/generator/export_qvf.py
 
-      # Step 4: Upload QVF Artifact
       - name: Upload QVF Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -80,12 +74,69 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # Step 5: Build Summary
       - name: Build Summary
-        if: success()
         run: |
           echo "QVF Build Successful."
           echo "Base Application: Sales_RAW_Ingestion"
-          echo "Authentication: Qlik API Key"
           echo "No-Data Export: Enabled"
-          echo "Versioned Artifact: Uploaded"
+          echo "Artifact Uploaded Successfully."
+
+  # ==========================================
+  # JOB 2: DEPLOY QVF TO DEV
+  # ==========================================
+
+  deploy-dev:
+    name: Deploy QVF to DEV
+    runs-on: ubuntu-latest
+    needs: build-qvf
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download QVF Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Sales-QVF-Build-${{ github.run_number }}
+          path: dist
+
+      - name: Configure Qlik API Access
+        env:
+          QLIK_API_KEY: ${{ secrets.QLIK_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          api_key = os.environ.get("QLIK_API_KEY")
+
+          if not api_key:
+              sys.exit("QLIK_API_KEY is missing.")
+
+          with open(os.environ["GITHUB_ENV"], "a") as file:
+              file.write(f"QLIK_ACCESS_TOKEN={api_key}\n")
+
+          print("Qlik API authentication configured.")
+          PY
+
+      - name: Deploy QVF to DEV
+        id: deploy
+        env:
+          QLIK_TENANT_URL: ${{ secrets.QLIK_TENANT_URL }}
+          TARGET_ENV: DEV
+        run: |
+          python .github/generator/deploy_qvf.py
+
+      - name: DEV Deployment Summary
+        if: success()
+        run: |
+          echo "DEV Deployment Successful."
+          echo "Environment: DEV"
+          echo "Application ID: ${{ steps.deploy.outputs.app_id }}"
+          echo "QVF Artifact: Same Build Artifact"
